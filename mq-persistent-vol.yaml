@@ -1,0 +1,14 @@
+kind: PersistentVolume
+apiVersion: v1
+metadata:
+  name: mq-ocr2r-storage
+  labels:
+    type: local
+spec:
+  storageClassName: hostpath-class
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/var/icpstorage/ocr2r"

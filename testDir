@@ -1,0 +1,5 @@
+if ssh root@10.0.12.66 '[ ! -d /var/lib/helm ]'; then
+   echo "Directory does not exist"
+else
+   echo "Directory exists"
+fi

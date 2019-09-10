@@ -1,0 +1,294 @@
+source /OCR2R/ocr2r.prop
+echo ICP_HOMEDIR is $ICP_HOMEDIR
+
+if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root" 1>&2
+   exit 1
+fi
+
+#Configure kubectl
+#kubectl config set-cluster cluster.local --server=https://10.0.12.60:8001 --insecure-skip-tls-verify=true
+#kubectl config set-context cluster.local-context --cluster=cluster.local
+#kubectl config set-credentials admin --token=eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdF9oYXNoIjoidnRoN2tsZDhjZDIxMHZ4cjBibTIiLCJyZWFsbU5hbWUiOiJjdXN0b21SZWFsbSIsInVuaXF1ZVNlY3VyaXR5TmFtZSI6ImFkbWluIiwiaXNzIjoiaHR0cHM6Ly9teWNsdXN0ZXIuaWNwOjk0NDMvb2lkYy9lbmRwb2ludC9PUCIsImF1ZCI6ImI2MzVlYTI3MDEyNDA5OWQ4YTM5NmFkOGZjZWRkMzllIiwiZXhwIjoxNTMxOTUzNTYwLCJpYXQiOjE1MzE5MjQ3NjAsInN1YiI6ImFkbWluIiwidGVhbVJvbGVNYXBwaW5ncyI6W119.Fl3yceD1NjWJY-CbAZ9pXzSsefP17NM_XJGcsy5YRrXgWAahsw9LJZEJnna4aZRCkmJHjJuAT7ZB2iH7r3YWpN3EDenCdH1EDCrrBfMR52LiLANvUMQvtYd1MYPC-G1o0jg8cuGVTYJwdzj57uEXdd5jyxN2uLlquvl9YgZSj7maVAMjgqfEXGgOK8Eky5jSojkFmeX7QDCnE83zBo4BlcaGlI0RRdZP6ou67a0OTNS1RdZtYZW9NwHPtY9fsTD2RCSul58rKdfxZKMDOANrbAwI8BZJpJTGd_Df4HZhFsUOIKl_WGix4fz3sc96AoaM8RCNdmfVPrPztM9oa5R7UA
+#kubectl config set-context cluster.local-context --user=admin --namespace=default
+#kubectl config use-context cluster.local-context
+
+##### Purpose: Login using bx pr login
+echo "ICP_HOMEDIR: $ICP_HOMEDIR"
+if [[ "$MASTERNODE" == "" ]] ; then
+   MASTERNODE=$(awk '/master/{print $1}' /etc/hosts)
+   if [[ "$MASTERNODE" == "" ]] ; then
+      echo Master node not found
+      exit 1
+   fi
+fi
+echo =====  Master node name is  : $MASTERNODE =====
+echo ===== login to ICP cluster =====
+echo ===== Run the following command to login to cluster using bx cli =====
+bx pr login -a https://$MASTERNODE:8443 --skip-ssl-validation -u admin -p admin
+#####
+
+#start skip
+read -p "skip?" skip
+if [ "$skip" = "n" ]; then
+##### Create storage and storage-claim
+echo "Create storage and claim? y/n"; read ans
+if [ "$ans" = "y" ]; then
+   echo Config the storage yaml files
+   kubectl create -f $ocr2rDir/persistent-vol.yaml
+   kubectl create -f $ocr2rDir/persistent-vol-claim.yaml
+fi
+#####
+
+##### Purpose: Run bx pr cluster-config mycluster to download Helm Certificates
+echo ===== Run bx pr cluster-config mycluster to download Helm Certificates =====
+#bx pr cluster-config mycluster
+bx pr cluster-config $CLUSTER
+#####
+
+##### Purpose: Initialize Helm CLI and copy certificates for TLS
+echo ===== Create helm home directory =====
+if [[ "$CLUSTERENV" == "yes" ]] ; then 
+echo Clustered Environment detect
+echo Not configuring clustered environment....
+exit 1
+   for server in $NODES
+   do
+      if ssh root@$server '[ ! -d /var/lib/helm ]'; then
+         # echo "/bin/rm -fr /var/lib/helm - WORK1"
+         # ssh root@$WORK1 "/bin/rm -fr /var/lib/helm"
+         echo "mkdir -p /var/lib/helm - WORK1"
+         ssh root@$WORK1 "mkdir -p /var/lib/helm/charts"  > /dev/null 2>&1
+         echo "export HELM_HOME=/var/lib/helm - WORK1"
+         ssh root@$WORK1 "export HELM_HOME=/var/lib/helm" > /dev/null 2>&1
+      fi
+      if [ ! -d /var/lib/helm ]; then
+         echo "mkdir -p /var/lib/helm"
+         mkdir -p /var/lib/helm/charts
+         echo "export HELM_HOME=/var/lib/helm"
+         export HELM_HOME=/var/lib/helm
+
+         echo ===== Copy certificates to /var/lib/helm =====
+         echo "Copying /root/.helm to /var/lib/helm"
+         cp -r /root/.helm/* /var/lib/helm > /dev/null 2>&1
+         echo "Copying charts to /var/lib/helm/charts"
+         cp -r /OCR2R/charts/* /var/lib/helm/charts > /dev/null 2>&1
+      fi
+   done
+else   
+   if [ ! -d /var/lib/helm ]; then
+      echo "mkdir -p /var/lib/helm"
+      mkdir -p /var/lib/helm/charts
+      echo "export HELM_HOME=/var/lib/helm"
+      export HELM_HOME=/var/lib/helm
+
+      echo ===== Copy certificates to /var/lib/helm =====
+      echo "Copying /root/.helm to /var/lib/helm"
+      cp -r /root/.helm/* /var/lib/helm > /dev/null 2>&1
+      echo "Copying charts to /var/lib/helm/charts"
+      cp -r /OCR2R/charts/* /var/lib/helm/charts > /dev/null 2>&1
+   fi
+fi
+
+echo ===== Inintialize helm CLI =====
+echo "helm init --client-only --skip-refresh"
+helm init --client-only --skip-refresh
+
+echo ===== Verify helm cli version =====
+echo "helm version --tls"
+helm version --tls
+
+#echo ===== To view available packages internet connection reqd =====
+#echo ===== Run the following command =====
+#echo helm search -l
+#####
+
+##### Purpose: Create secret to pull the image from Docker store
+# echo 1. Create your own docker account at https://store.docker.com/signup
+# echo 2. Search for Db2 Developer-C Edition
+# echo 3. Subscribe to Db2 Developer-C Edition
+# echo 4. Go to https://cloud.docker.com and in upper right corner
+# echo 5. Click on your user id drop-down menu and select
+# echo    Account Settings. Scroll down and add API key "APIKEY"
+# echo 6. Give it a name "SECRETNAME" and you will use that name as the docker-registry key
+# echo Creating docker-registry secret to authenticate to store.docker.com
+
+# Replace scret name, API key and email with your values
+USERNAME=$SECRETUSER
+SECRETNAME=$SECRETNAME
+APIKEY=$APIKEY
+EMAIL=$SECRETEMAIL
+
+if [ ! -f /root/.secretCreated ]; then
+   touch /root/.secretCreated
+   kubectl create secret docker-registry $SECRETNAME \
+        --docker-username=$USERNAME \
+        --docker-password=$APIKEY \
+        --docker-email=$EMAIL \
+        --namespace=default
+
+   echo Patch service account with docker-registry secret 
+   kubectl patch serviceaccount default -p \
+       '{"imagePullSecrets": [{"name": "prolifics01"}]}' \
+        --namespace=default
+else
+   echo Secret alredy created
+fi
+#####
+
+##### Purpose: Add IBM Catalog and others to Helm repo
+echo ===== List Helm repository =====
+# Stable repo link  https://kubernetes-charts.storage.googleapis.com/
+helm repo add stable https://kubernetes-charts.storage.googleapis.com/
+
+fi #endskip
+
+helm repo remove OCR2R 
+helm repo remove $REPO
+echo ===== Add IBM Catalog to the $REPO Helm repository =====
+helm repo add $REPO https://registry.bluemix.net/helm/ibm/
+helm repo update
+# helm install $REPO
+helm repo list
+read
+echo =================================================================
+echo Create ReplicaSet 1 for local web werver for helm charts
+echo Create NodePort for traffic between internal and external traffic
+echo =================================================================
+kubectl apply -f service.yaml
+
+echo ===== Add Kubernetes Incubator repository =====
+#helm repo add incubator https://kubernetes-charts-incubator.storage.googleapis.com/
+
+echo ===== List Helm repository =====
+#helm repo list
+
+echo ===== Search Helm repo $REPO \(If no internet, it will not work\) =====
+helm search $REPO
+
+#echo ===== Search Kubernetes incubator repositroy =====
+#helm search incubator
+#####
+
+### Purpose: Create $REPO helm repository
+echo ===== Get NodePort for the $REPO-service service =====
+echo repo: $REPO
+read
+PORT=$(kubectl get svc $REPO-service -o json | jq -r .spec.ports[].nodePort)
+PORT=$(kubectl get svc $REPO-service -o json | jq -r .spec.ports[].nodePort)
+echo Port: $PORT
+read
+
+echo  ===== Create $REPO helm repository ===== 
+echo  ===== Running command \"helm repo add $REPO http://$IPADDR:$PORT/repo/stable\" =====
+#helm repo add $REPO http://$IPADDR:$PORT/repo/stable
+#helm repo add $REPO https://raw.githubusercontent.com/IBM/charts/master/repo/stable/
+####
+
+##### Purpose: Install db2 chart
+echo ===== Install db2 chart =====
+echo ===== Running command \"helm install $REPO/ibm-db2oltp-dev -n dev -f db2-values.yaml --tls\" =====
+#read -p "Install DB2? y/n: " instdb2
+#if [[ $instdb2 == "y" ]]; then
+  #helm install $REPO/ibm-db2oltp-dev -n $db2dev -f db2-values.yaml --tls
+   helm install ibm-charts/ibm-db2oltp-dev -n $db2dev -f db2-values.yaml --tls
+  echo Sleeping for 5 minutes ..... 
+  # sleep 300
+#else
+#   echo Not installing DB2...
+#fi
+
+helm status $db2dev --tls
+#read -p "Is $db2dev ready? y/n: " cont
+#if [[ $cont == "n" ]]; then
+#   echo Sleeping 5 minutes...
+#   #sleep 300
+#else
+#   echo continuing...
+#fi
+exit 0
+
+#read -p "Continue? y/n: " cont
+#if [[ $cont == "n" ]]; then
+#   echo exiting...
+#   exit 0
+#else
+#   echo continuing...
+#fi
+#####
+echo Manual Exit....
+exit 0
+##### Purpose: Install MQ Advanced
+echo ===== Install MQ Advanced =====
+echo Running command \"helm install $REPO/ibm-mqadvanced-server-dev -n qdev -f mq-values.yaml --tls\"
+read -p "Install MQ? y/n: " instmq
+if [[ $instmq == "y" ]]; then
+   helm install $REPO/ibm-mqadvanced-server-dev -n $mqdev -f mq-values.yaml --tls
+   echo Sleeping 5 minutes...
+   #sleep 300
+else
+   echo Not installing MQ...
+fi
+
+helm status $mqdev --tls
+read -p "Is $mqdev ready? y/n: " cont
+if [[ $cont == "n" ]]; then
+   echo Sleeping 5 minutes...
+   #sleep 300
+else
+   echo continuing...
+fi
+
+read -p "Continue? y/n: " cont
+if [[ $cont == "n" ]]; then
+   echo exiting...
+   exit 0
+else
+   echo continuing...
+fi
+#####
+
+##### Purpose: Create MQ NotificationQ and grant all auths
+echo ===== Create MQ NotificationQ and grant all auths =====
+echo ===== Get MQ pod name =====
+MQPOD=$(kubectl -n default get pods --selector app=$(mqdev)-ibm-mq -o jsonpath='{.items[].metadata.name}')
+
+echo MQ pod name = $MQPOD
+
+echo ===== Create MQ commands in a script and then copy to the Pod =====
+
+cat << EOF > /tmp/createq
+#!/bin/bash
+# Copy this script in MQ container and then run it
+echo "DEFINE QL('NotificationQ')" > /tmp/crq.txt
+runmqsc qmgr < /tmp/crq.txt
+dspmqaut -m qmgr -t qmgr -p app
+setmqaut -m qmgr -t qmgr -p app +all
+echo "ALTER QMGR CHLAUTH(DISABLED)" > /tmp/chauth.txt
+runmqsc qmgr < /tmp/chauth.txt
+dspmqaut -m qmgr -n NotificationQ -t queue -p app
+setmqaut -m qmgr -n NotificationQ -t queue -p app +all
+dspmqaut -m qmgr -n NotificationQ -t queue -p app
+EOF
+
+chmod +x /tmp/createq
+kubectl -n default cp /tmp/createq $MQPOD:/tmp
+
+echo ===== Run script in MQ pod =====
+kubectl -n default exec -it $MQPOD -- /bin/bash -c "/tmp/createq"
+#####
+
+##### Purpose: Create secrets for trader container
+echo ===== Create tables in Db2 for portfolio =====
+echo
+
+echo Get the db2 pod name
+DB2POD=$(kubectl -n default get pods --selector app=$(db2dev)-ibm-db2oltp-dev -o jsonpath='{.items[].metadata.name}')
+echo Db2 pod name = $DB2POD
+
+echo ===== Copy file to the Pod =====
+kubectl -n default cp ./tables.sql $DB2POD:/tmp
+
+echo ===== Create tables in Db2 pod =====
+kubectl -n default exec -it $DB2POD -- /bin/bash -c "su - db2psc -c \"db2 -tvf /tmp/tables.sql\""
+#####

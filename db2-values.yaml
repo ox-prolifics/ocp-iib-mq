@@ -1,0 +1,87 @@
+###############################################################################
+################################ IBM Db2 ######################################
+###############################################################################
+
+###############################################################################
+## Common image variables
+###############################################################################
+
+## Architecture - e.g. amd64, s390x, ppc64le. Specific worker node architecture
+## to deploy to.
+## You can use kubectl version command to determine the architecture on the 
+## desired worker node. 
+
+global:
+  image:
+    secretName: ""
+arch: ""
+image:
+  repository: store/ibmcorp/db2_developer_c
+  tag: 11.1.3.3
+  pullPolicy: IfNotPresent 
+service:
+  name: ibm-db2oltp-dev
+  type: NodePort
+  port: 50000
+  tsport: 55000
+db2inst:
+  instname: "db2psc"
+  password: "password"
+options:
+  databaseName: "PSDB"
+  oracleCompatibility: "false"
+
+## global persistence settings
+persistence:
+  enabled: true
+  useDynamicProvisioning: true
+
+## hadr option
+hadr:
+  enabled: false
+  useDynamicProvisioning: false
+
+## Persistence parameters for /database
+dataVolume:
+  name: "db2-ocr2r-storage"
+
+  ## Specify the name of the Existing Claim to be used by your application
+  ## empty string means don't use an existClaim
+  existingClaimName: "db2-ocr2r-storage-claim"
+
+  ## Specify the name of the StorageClass
+  ## empty string means don't use a StorageClass
+  storageClassName: "hostpath-class"
+  size: 2Gi
+
+etcdVolume:
+  name: ""
+
+  ## Specify the name of the StorageClass
+  ## empty string means don't use a StorageClass
+  storageClassName: ""
+  size: 1Gi
+
+
+hadrVolume:
+  name: ""
+
+  ## Specify the name of the Existing Claim to be used by your application
+  ## empty string means don't use an existClaim
+  existingClaimName: ""
+
+  ## Specify the name of the StorageClass
+  ## empty string means don't use a StorageClass
+  storageClassName: ""
+  size: 1Gi
+
+## Configure resource requests and limits
+## ref: http://kubernetes.io/docs/user-guide/compute-resources/
+##
+resources:
+  requests:
+    memory: 1Gi
+    cpu: 500m
+  limits:
+    memory: 1Gi
+    cpu: 1000m

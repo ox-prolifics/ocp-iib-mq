@@ -1,0 +1,36 @@
+# A simple yaml file to create a replica set
+#---
+#apiVersion: extensions/v1beta1 
+#kind: ReplicaSet
+#metadata:
+#  name: Prolifics-OCR2R-charts
+##name: helm-local-repo
+#spec:
+#  replicas: 1
+#  selector:
+#    matchLabels:
+#    app: Prolifics-OCR2R-charts 
+#  template:
+#    metadata:
+#      name: 
+#      labels:
+#        app: Prolifics-OCR2R-charts 
+#    spec:
+#      containers:
+#      - name: Prolifics-OCR2R-charts 
+#        image: nginx-icp-charts:1.13.9-alpine
+#---
+# A simple yaml file to create a service
+apiVersion: v1
+kind: Service
+metadata:
+  name: prolifics-ocr2r-charts-service
+spec:
+  selector:
+    app: Prolifics-OCR2R-charts 
+  ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    nodePort: 31234
+  type: NodePort

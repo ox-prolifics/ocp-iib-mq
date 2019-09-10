@@ -1,0 +1,27 @@
+MASTERNODE=mycluster.icp
+ocr2rDir=/OCR2R
+export ICP_HOMEDIR=/opt/ibm-cp-app-mod-2.1.0.3
+HELM_HOME=/var/lib/helm
+ENVNAME="devtest"
+CLUSTER=mycluster
+CLUSTERENV=no
+SECRETUSER=goutam.giri@prolifics.com
+SECRETNAME=prolifics01
+APIKEY=f5e2595c-20d5-4a82-affb-78c81d089ea9
+SECRETEMAIL=goutam.giri@prolifics.com
+STORAGETYPE=noneGluster
+STORAGE=ocr2r-storage
+REPO=prolifics-ocr2r-charts
+IPADDR=10.0.12.60
+#export ICP_HOMEDIR=~/ICP
+#!WORK1=10.0.12.66
+#!WORK2=10.0.12.67
+#!WORK3=10.0.12.68
+#
+#!NODES="$WORK1 $WORK2 $WORK3"
+
+#### DB2 ####
+db2dev=db-test
+
+#### MQ ####
+mqdev=mqdev

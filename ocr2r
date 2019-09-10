@@ -1,0 +1,182 @@
+#!/bin/bash
+source /OCR2R/ocr2r.prop
+
+# for server in $NODES
+# do
+#    echo $server
+# done
+# exit 0
+
+if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root" 1>&2
+   exit 1
+fi
+
+#cd $ICP_HOMEDIR/cluster
+
+
+# Masternode
+MASTERNODE=$(awk '/master/{print $1}' /etc/hosts)
+if [[ "$MASTERNODE" == "" ]] ; then
+   echo Master node not found
+   exit 1
+fi
+echo ====== Master node name is  : $MASTERNODE ======
+
+echo ====== login to ICP cluster ======
+echo Run the following command to login to cluster using bx cli
+
+bx pr login -a https://$MASTERNODE:8443 --skip-ssl-validation -u admin -p admin
+
+echo ====== Run bx pr cluster-config mycluster to download Helm Certificates ======
+
+bx pr cluster-config mycluster
+
+# WORK1=10.0.12.66
+# WORK2=10.0.12.67
+# WORK3=10.0.12.68
+
+echo ====== Inintialize helm CLI ======
+
+echo "helm init --client-only --skip-refresh"
+helm init --client-only --skip-refresh
+
+echo ====== Copy certificates to /var/lib/helm ======
+
+# NODES="$WORK1 $WORK2 $WORK3"
+
+for server in $NODES
+do
+   if ssh root@$server '[ ! -d /var/lib/helm ]'; then
+      # echo "/bin/rm -fr /var/lib/helm - WORK1"
+      # ssh root@$WORK1 "/bin/rm -fr /var/lib/helm"
+      echo "mkdir -p /var/lib/helm - WORK1"
+      ssh root@$WORK1 "mkdir -p /var/lib/helm/charts"
+      echo "export HELM_HOME=/var/lib/helm - WORK1"
+      ssh root@$WORK1 "export HELM_HOME=/var/lib/helm"
+   fi
+
+   echo "Copying /root/.helm to $server:/var/lib/helm"
+   scp -r /root/.helm/* $server:/var/lib/helm
+   echo "Copying /root/.helm to $server:/var/lib/helm"
+   scp -r /OCR2R/charts/* $server:/var/lib/helm/charts
+done
+
+# Purpose: Build Local repo of IBM Charts
+
+WD=$(pwd)
+
+echo ==========================================================
+echo Download IBM Charts 
+echo The command below is for reference only. The charts are already downloaded. 
+echo \<git clone https://github.com/IBM/charts.git\>
+echo ==========================================================
+
+echo Regenerate index.yaml for local repository
+echo Running \"helm repo index --url=http://10.0.12.63:31234/repo/stable\" 
+echo ==========================================================
+
+cd charts/repo/stable
+helm repo index --url=http://10.0.12.63:31234/repo/stable .
+echo Above command will change \"urls\" in index.yaml to local repo URL
+echo ==========================================================
+
+c  $WD
+echo Build nginx Docker container using charts and docroot folders 
+echo We already downloaded nginx:1.13.9-alpine using command
+echo \"docker pull nginx:1.13.9-alpine\"
+echo "=========================================================="
+
+for worker in $NODES
+do
+   echo $worker - Running \"docker build -t nginx-icp-charts:1.13.9-alpine -f Dockerfile .\"
+   ssh $worker "cd $PWD && docker build -t nginx-icp-charts:1.13.9-alpine -f Dockerfile ."
+   echo ==========================================================
+done
+exit 0
+
+echo ====== Verify helm cli version ======
+
+echo "helm version --tls"
+helm version --tls
+
+echo ====== To view available packages internet connection required ======
+echo ====== Run the following command ======
+
+echo helm search -l
+
+echo 1. Create your own docker account at https://store.docker.com/signup
+echo 2. Search for Db2 Developer-C Edition
+echo 3. Subscribe to Db2 Developer-C Edition
+echo 4. Go to https://cloud.docker.com and in upper right corner
+echo 5. Click on your user id drop-down menu and select
+echo    Account Settings. Scroll down and add API key "APIKEY"
+echo 6. Give it a name "SECRETNAME" and you will use that name as the docker-registry key
+echo ====== Creating docker-registry secret to authenticate to store.docker.com ======
+
+# Replace scret name, API key and email with your values
+USERNAME=goutam.giri@prolifics.com
+SECRETNAME=prolifics01
+APIKEY=f5e2595c-20d5-4a82-affb-78c81d089ea9
+EMAIL=goutam.giri@prolifics.com
+
+kubectl create secret docker-registry $SECRETNAME \
+        --docker-username=$USERNAME \
+        --docker-password=$APIKEY \
+        --docker-email=$EMAIL \
+        --namespace=default
+
+echo ====== Patch service account with docker-registry secret ======
+
+kubectl patch serviceaccount default -p \
+       '{"imagePullSecrets": [{"name": "prolifics01"}]}' \
+        --namespace=default
+
+echo ====== List Helm repository ======
+
+# Stable repo link  https://kubernetes-charts.storage.googleapis.com/
+# helm repo add stable https://kubernetes-charts.storage.googleapis.com/
+
+helm repo list
+
+echo ====== Add IBM Catalog to the local Helm repository ======
+
+helm repo add ibm-charts https://raw.githubusercontent.com/IBM/charts/master/repo/stable/
+
+echo ====== Add Kubernetes Incubator repository ======
+
+helm repo add incubator https://kubernetes-charts-incubator.storage.googleapis.com/
+
+echo ====== List Helm repository ======
+
+helm repo list
+
+echo ====== Search Helm repo ibm-charts \(If no internet, it will not work\) ======
+
+helm search ibm-charts
+
+echo ====== Search Kubernetes incubator repositroy ======
+
+helm search incubator
+# Purpose: Create local helm repository
+echo ===== Get NodePort for the helm-local-repo-service service =====
+PORT=$(kubectl get svc helm-local-repo-service -o json | jq -r .spec.ports[].nodePort)
+
+echo  ===== Create local helm repository ===== 
+echo  ===== Running command \"helm repo add local http://10.0.12.63:$PORT/repo/stable\" =====
+helm repo add local http://10.0.12.63:$PORT/repo/stable
+#####
+
+# Purpose: Install db2 chart
+echo ===== Install db2 chart =====
+echo ===== Running command \"helm install local/ibm-db2oltp-dev -n dev -f db2-values.yaml --tls\" =====
+helm install local/ibm-db2oltp-dev -n dev -f db2-values.yaml --tls 
+#####
+
+# Purpose: Install MQ Advanced
+echo ===== Install MQ Advanced =====
+echo Running command \"helm install local/ibm-mqadvanced-server-dev -n qdev -f mq-values.yaml --tls\"
+
+helm install local/ibm-mqadvanced-server-dev -n qdev -f mq-values.yaml --tls
+#####
+
